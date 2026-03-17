@@ -20,7 +20,7 @@ vectorizer = joblib.load("tfidf_vectorizer.pkl")
 # -----------------------------
 # MongoDB Connection
 # -----------------------------
-MONGO_URL = os.getenv()
+MONGO_URL = os.getenv("MONGO_URI")
 
 client = MongoClient(MONGO_URL)
 
