@@ -11,6 +11,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+def utc_now_iso():
+    return datetime.utcnow().isoformat()
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "time": utc_now_iso()}
+
+@app.head("/health")
+def health_check_head():
+    return {"status": "ok"}
+    
 # -----------------------------
 # Load ML Model
 # -----------------------------
