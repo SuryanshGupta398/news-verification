@@ -22,36 +22,40 @@ def health_check():
 def health_check_head():
     return {"status": "ok"}
     
-# -----------------------------
-# Load ML Model
-# -----------------------------
-model = joblib.load("fake_news_model.pkl")
-vectorizer = joblib.load("tfidf_vectorizer.pkl")
+model = None
+vectorizer = None
+news_docs = []
+tfidf_db = None
 
-# -----------------------------
-# MongoDB Connection
-# -----------------------------
-MONGO_URL = os.getenv("MONGO_URI")
 
-client = MongoClient(MONGO_URL)
+@app.on_event("startup")
+def load_resources():
+    global model, vectorizer, news_docs, tfidf_db
 
-db = client["fake_new_app"]
-collection = db["news"]
-news_docs = list(collection.find({}, {"title":1, "description":1, "published_by":1, "source":1}))
+    print("Loading ML model...")
+    model = joblib.load("fake_news_model.pkl")
+    vectorizer = joblib.load("tfidf_vectorizer.pkl")
 
-texts = [
-    n.get("title","") + " " + n.get("description","")
-    for n in news_docs
-]
+    print("Connecting MongoDB...")
+    MONGO_URL = os.getenv("MONGO_URI")
+    client = MongoClient(MONGO_URL)
 
-# Precompute TFIDF
-tfidf_db = vectorizer.transform(texts)
-# -----------------------------
-# Request Body Model
-# -----------------------------
+    db = client["fake_new_app"]
+    collection = db["news"]
+
+    news_docs = list(collection.find({}, {"title":1,"description":1,"published_by":1,"source":1}))
+
+    texts = [
+        n.get("title","") + " " + n.get("description","")
+        for n in news_docs
+    ]
+
+    tfidf_db = vectorizer.transform(texts)
+
+    print("Startup completed successfully")
+
 class NewsRequest(BaseModel):
     text: str
-
 
 # -----------------------------
 # Find Similar News
