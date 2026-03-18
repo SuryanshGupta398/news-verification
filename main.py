@@ -1,6 +1,5 @@
 import os
-from http.client import HTTPException
-
+from fastapi import HTTPException
 import joblib
 import numpy as np
 from fastapi import FastAPI
@@ -8,7 +7,8 @@ from pymongo import MongoClient
 from sklearn.metrics.pairwise import cosine_similarity
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-
+from datetime import datetime
+import uvicorn
 app = FastAPI()
 
 def utc_now_iso():
@@ -292,3 +292,7 @@ def verify_news(data: NewsRequest):
         "best_match_title":      None,
         "best_match_score":      None,
     }
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
