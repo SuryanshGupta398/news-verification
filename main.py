@@ -13,6 +13,10 @@ def home():
 def health():
     return {"status": "ok"}
 
+@app.head("/health")
+def health_check_head():
+    return {"status": "ok"}
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
@@ -33,9 +37,6 @@ if __name__ == "__main__":
 # def health_check():
 #     return {"status": "ok", "time": utc_now_iso()}
 
-# @app.head("/health")
-# def health_check_head():
-#     return {"status": "ok"}
 import threading
 
 model = None
