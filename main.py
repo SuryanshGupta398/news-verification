@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+import joblib
+from pymongo import MongoClient
 import os
 
 app = FastAPI()
@@ -14,18 +16,15 @@ def health():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-# import os
+
 # from fastapi import HTTPException
-# import joblib
+
 # import numpy as np
-# from fastapi import FastAPI
-# from pymongo import MongoClient
+
 # from sklearn.metrics.pairwise import cosine_similarity
 # from pydantic import BaseModel
 # from fastapi.middleware.cors import CORSMiddleware
 # from datetime import datetime
-# import uvicorn
-# app = FastAPI()
 
 # def utc_now_iso():
 #     return datetime.utcnow().isoformat()
@@ -38,38 +37,50 @@ if __name__ == "__main__":
 # def health_check_head():
 #     return {"status": "ok"}
     
-# model = None
-# vectorizer = None
-# news_docs = []
-# tfidf_db = None
+model = None
+vectorizer = None
+news_docs = []
+tfidf_db = None
 
 
-# @app.on_event("startup")
-# def load_resources():
-#     global model, vectorizer, news_docs, tfidf_db
+@app.on_event("startup")
+def load_resources():
+    global model, vectorizer, news_docs, tfidf_db
 
-#     print("Loading ML model...")
-#     model = joblib.load("fake_news_model.pkl")
-#     vectorizer = joblib.load("tfidf_vectorizer.pkl")
+    try:
+        print("🔹 Loading model...")
+        model = joblib.load("fake_news_model.pkl")
 
-#     print("Connecting MongoDB...")
-#     MONGO_URL = os.getenv("MONGO_URI")
-#     client = MongoClient(MONGO_URL)
+        print("🔹 Loading vectorizer...")
+        vectorizer = joblib.load("tfidf_vectorizer.pkl")
 
-#     db = client["fake_new_app"]
-#     collection = db["news"]
+        print("🔹 Connecting MongoDB...")
+        mongo_url = os.getenv("MONGO_URI")
+        if not mongo_url:
+            print("❌ MONGO_URI not found")
+            return
 
-#     news_docs = list(collection.find({}, {"title":1,"description":1,"published_by":1,"source":1}))
+        client = MongoClient(mongo_url)
 
-#     texts = [
-#         n.get("title","") + " " + n.get("description","")
-#         for n in news_docs
-#     ]
+        db = client["fake_new_app"]
+        collection = db["news"]
 
-#     tfidf_db = vectorizer.transform(texts)
+        news_docs = list(collection.find({}, {"title":1,"description":1,"source":1}))
 
-#     print("Startup completed successfully")
+        print(f"✅ Loaded {len(news_docs)} news articles")
 
+        if news_docs:
+            texts = [
+                n.get("title","") + " " + n.get("description","")
+                for n in news_docs
+            ]
+            tfidf_db = vectorizer.transform(texts)
+
+        print("✅ Startup complete")
+
+    except Exception as e:
+        print("❌ ERROR DURING STARTUP:", str(e))
+        
 # class NewsRequest(BaseModel):
 #     text: str
 
