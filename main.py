@@ -36,15 +36,14 @@ if __name__ == "__main__":
 # @app.head("/health")
 # def health_check_head():
 #     return {"status": "ok"}
-    
+import threading
+
 model = None
 vectorizer = None
 news_docs = []
 tfidf_db = None
 
-
-@app.on_event("startup")
-def load_resources():
+def load_resources_background():
     global model, vectorizer, news_docs, tfidf_db
 
     try:
@@ -56,10 +55,6 @@ def load_resources():
 
         print("🔹 Connecting MongoDB...")
         mongo_url = os.getenv("MONGO_URI")
-        if not mongo_url:
-            print("❌ MONGO_URI not found")
-            return
-
         client = MongoClient(mongo_url)
 
         db = client["fake_new_app"]
@@ -67,7 +62,7 @@ def load_resources():
 
         news_docs = list(collection.find({}, {"title":1,"description":1,"source":1}))
 
-        print(f"✅ Loaded {len(news_docs)} news articles")
+        print(f"✅ Loaded {len(news_docs)} news")
 
         if news_docs:
             texts = [
@@ -76,11 +71,20 @@ def load_resources():
             ]
             tfidf_db = vectorizer.transform(texts)
 
-        print("✅ Startup complete")
+        print("✅ Background loading done")
 
     except Exception as e:
-        print("❌ ERROR DURING STARTUP:", str(e))
-        
+        print("❌ ERROR:", str(e))
+
+
+@app.on_event("startup")
+def startup_event():
+    print("🚀 Server starting...")
+
+    # Run heavy loading in background thread
+    thread = threading.Thread(target=load_resources_background)
+    thread.start()
+    
 # class NewsRequest(BaseModel):
 #     text: str
 
