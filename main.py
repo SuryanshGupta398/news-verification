@@ -21,12 +21,12 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
-# from fastapi import HTTPException
+from fastapi import HTTPException
 
 # import numpy as np
 
 # from sklearn.metrics.pairwise import cosine_similarity
-# from pydantic import BaseModel
+from pydantic import BaseModel
 # from fastapi.middleware.cors import CORSMiddleware
 # from datetime import datetime
 
