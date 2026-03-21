@@ -1,10 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 import joblib
 from pymongo import MongoClient
 import os
 
 app = FastAPI()
-
+news_router = APIRouter(prefix="/news", tags=["News"])
 @app.get("/")
 def home():
     return {"message": "API is running"}
