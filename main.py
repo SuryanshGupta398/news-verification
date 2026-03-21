@@ -245,6 +245,11 @@ def search_mongodb(headline: str) -> list:
     Uses word overlap with stop word removal.
     Searches in batches to avoid RAM issues on Render free tier.
     """
+    global collection
+    if collection is None:
+        print("Mongodb is not initialised yet.")
+        return []
+        
     try:
         matches   = []
         batch_size = 300
@@ -292,6 +297,11 @@ async def verify_news(headline: str = Form(...)):
     if not headline:
         raise HTTPException(status_code=400, detail="Headline is required.")
 
+    if collection is None:
+    return {
+        "status": "loading",
+        "message": "Server is starting, try again in few seconds"
+    }
     start_time    = datetime.utcnow()
     user_polarity = get_polarity(headline)
 
