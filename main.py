@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, Form
 import joblib
 from pymongo import MongoClient
 import os
