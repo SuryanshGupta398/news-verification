@@ -122,214 +122,303 @@ def extract_entities(text: str) -> set:
 
 
 # ── Sentiment polarity — no library needed ────────────────────────
+# ── Polarity word lists ────────────────────────────────────────────
 NEGATIVE_WORDS = {
     "died", "dead", "death", "killed", "murdered", "lost", "defeated",
     "arrested", "jailed", "fired", "resigned", "crashed", "failed",
     "attacked", "bombed", "expelled", "suspended", "banned", "collapsed",
-    "injured", "hospitalized", "missing", "destroyed", "abolished",
-    "mart", "mara", "maut", "hatya", "nahi", "gaya", "gir",
+    "injured", "hospitalized", "missing", "destroyed", "convicted",
+    "mart", "mara", "maut", "hatya", "nahi", "gir", "toot",
 }
 
 POSITIVE_WORDS = {
     "won", "win", "victory", "launched", "inaugurated", "appointed",
     "elected", "promoted", "visited", "announced", "achieved", "grew",
     "increased", "recovered", "released", "celebrated", "awarded",
-    "daura", "yatra", "bole", "khela", "jeeta", "aaya",
+    "saved", "beat", "champion", "topped", "passed", "selected",
+    "jeeta", "jeet", "vijay", "safal", "aaya", "khola", "mila",
+}
+
+STOP_WORDS = {
+    "the","a","an","is","are","was","were","in","on","at","to","for",
+    "of","and","or","with","this","that","it","by","from","has","have",
+    "had","be","been","being","will","would","could","should","may",
+    "might","do","does","did","not","no","its","our","their","we","he",
+    "she","they","i","you","me","him","her","us","them","as","but","if",
+    "than","so","yet","both","either","each","than","too","very","just",
 }
 
 def get_polarity(text: str) -> str:
-    """Returns 'positive', 'negative', or 'neutral'"""
     words = set(re.findall(r'\b\w+\b', text.lower()))
-    neg_count = len(words & NEGATIVE_WORDS)
-    pos_count = len(words & POSITIVE_WORDS)
-    if neg_count > pos_count:
-        return "negative"
-    if pos_count > neg_count:
-        return "positive"
-    return "neutral"
-
-def find_all_similar_news(user_text: str, top_k: int = 10, min_score: float = 0.25):
-    if not news_docs or tfidf_db is None:
-        return []
-
-    tfidf_user = vectorizer.transform([user_text])
-    scores     = cosine_similarity(tfidf_user, tfidf_db)[0]
-
-    results = [
-        (news_docs[i], float(scores[i]))
-        for i in range(len(news_docs))
-        if float(scores[i]) >= min_score
-    ]
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results[:top_k]
-
-
-def get_polarity(text: str) -> str:
-    words = set(re.findall(r'\b\w+\b', text.lower()))
-    neg   = len(words & NEGATIVE_WORDS)
-    pos   = len(words & POSITIVE_WORDS)
+    neg = len(words & NEGATIVE_WORDS)
+    pos = len(words & POSITIVE_WORDS)
     if neg > pos: return "negative"
     if pos > neg: return "positive"
     return "neutral"
 
+def word_overlap_score(a: str, b: str) -> float:
+    """Overlap score with stop word removal."""
+    a_words = set(re.findall(r'\b\w+\b', a.lower())) - STOP_WORDS
+    b_words = set(re.findall(r'\b\w+\b', b.lower())) - STOP_WORDS
+    if not a_words or not b_words:
+        return 0.0
+    overlap = a_words & b_words
+    return len(overlap) / max(len(a_words), len(b_words))
 
-def compute_final_confidence(
-    user_polarity: str,
-    matches: list,
-) -> dict:
+def check_google_factcheck(claim: str) -> dict:
     """
-    For each matched article:
-      - If polarity AGREES   with user claim  → SUPPORTING  → adds to confidence
-      - If polarity OPPOSES  user claim       → CONTRADICTING → reduces confidence
-      - If neutral                            → ignored
-
-    Final confidence = (supporting_weight - contradicting_weight) / total_weight
-    Clamped to [0, 1].
+    Searches Google Fact Check Tools API.
+    No date restriction — checks all time.
     """
-    supporting     = []   # articles that agree
-    contradicting  = []   # articles that oppose
-    neutral_docs   = []   # articles with no clear polarity
-    admin_verdict  = None # admin overrides everything
+    GOOGLE_KEY = os.getenv("GOOGLE_FACT_CHECK_KEY")
+    if not GOOGLE_KEY:
+        return {"found": False, "reason": "GOOGLE_FACT_CHECK_KEY not set"}
+    try:
+        resp = requests.get(
+            "https://factchecktools.googleapis.com/v1alpha1/claims:search",
+            params={
+                "query":        claim,
+                "key":          GOOGLE_KEY,
+                "languageCode": "en",
+                "pageSize":     5,        # get top 5 fact checks
+            },
+            timeout=6,
+        )
+        data = resp.json()
 
-    for doc, score in matches:
-        full_text      = doc.get("title", "") + " " + doc.get("description", "")
-        article_polarity = get_polarity(full_text)
-        source         = doc.get("source", "user")
+        if "claims" not in data or not data["claims"]:
+            return {"found": False, "reason": "No fact-check records found"}
 
-        entry = {
-            "title":      doc.get("title", "")[:100],
-            "source":     source,
-            "similarity": round(score, 4),
-            "polarity":   article_polarity,
-            "weight":     score * (2.0 if source == "admin" else 1.0),
+        results = []
+        for item in data["claims"][:5]:
+            for review in item.get("claimReview", []):
+                rating = review.get("textualRating", "").lower()
+
+                if any(w in rating for w in ["false","fake","misleading","incorrect","wrong","pants on fire","inaccurate"]):
+                    verdict = "FAKE"
+                elif any(w in rating for w in ["true","correct","accurate","verified","mostly true"]):
+                    verdict = "REAL"
+                else:
+                    verdict = "UNCERTAIN"
+
+                results.append({
+                    "verdict":     verdict,
+                    "raw_rating":  review.get("textualRating", ""),
+                    "publisher":   review.get("publisher", {}).get("name", ""),
+                    "url":         review.get("url", ""),
+                    "claim_text":  item.get("text", ""),
+                })
+
+        if not results:
+            return {"found": False, "reason": "No reviews parsed"}
+
+        # Majority vote across all fact check results
+        fake_count = sum(1 for r in results if r["verdict"] == "FAKE")
+        real_count = sum(1 for r in results if r["verdict"] == "REAL")
+
+        if fake_count > real_count:
+            final_verdict = "FAKE"
+        elif real_count > fake_count:
+            final_verdict = "REAL"
+        else:
+            final_verdict = "UNCERTAIN"
+
+        return {
+            "found":         True,
+            "verdict":       final_verdict,
+            "total_checked": len(results),
+            "fake_count":    fake_count,
+            "real_count":    real_count,
+            "top_result":    results[0],
+            "all_results":   results,
         }
 
-        # Admin record — immediately determine verdict
-        if source == "admin":
-            if article_polarity == user_polarity or article_polarity == "neutral":
+    except requests.exceptions.Timeout:
+        return {"found": False, "reason": "Fact check API timed out"}
+    except Exception as e:
+        return {"found": False, "reason": str(e)}
+
+
+def search_mongodb(headline: str) -> list:
+    """
+    Searches ALL news in MongoDB — no date restriction.
+    Uses word overlap with stop word removal.
+    Searches in batches to avoid RAM issues on Render free tier.
+    """
+    try:
+        matches   = []
+        batch_size = 300
+        skip       = 0
+
+        while True:
+            batch = list(
+                news_collection.find(
+                    {},
+                    {"title": 1, "description": 1, "source": 1, "verified_by_admin": 1, "createdAt": 1}
+                )
+                .sort("createdAt", -1)
+                .skip(skip)
+                .limit(batch_size)
+            )
+
+            if not batch:
+                break
+
+            for doc in batch:
+                combined = doc.get("title", "") + " " + doc.get("description", "")
+                score    = word_overlap_score(headline, combined)
+
+                if score >= 0.25:
+                    matches.append({"doc": doc, "score": score})
+
+            # Stop scanning if we already have strong matches
+            # and have checked at least 600 docs
+            if skip >= 600 and len(matches) >= 10:
+                break
+
+            skip += batch_size
+
+        matches.sort(key=lambda x: x["score"], reverse=True)
+        return matches[:15]
+
+    except Exception as e:
+        print("MongoDB search error:", e)
+        return []
+
+
+@news_router.post("/verify-news")
+async def verify_news(headline: str = Form(...)):
+    headline = headline.strip()
+    if not headline:
+        raise HTTPException(status_code=400, detail="Headline is required.")
+
+    start_time    = datetime.utcnow()
+    user_polarity = get_polarity(headline)
+
+    # ── Step 1: Search MongoDB (ALL time, no date filter) ──────────
+    matches       = search_mongodb(headline)
+    supporting    = []
+    contradicting = []
+    admin_verdict = None
+
+    for m in matches:
+        doc          = m["doc"]
+        score        = m["score"]
+        article_text = doc.get("title", "") + " " + doc.get("description", "")
+        art_polarity = get_polarity(article_text)
+        is_admin     = doc.get("verified_by_admin", False) or doc.get("source") == "Admin"
+        weight       = score * (2.0 if is_admin else 1.0)
+
+        entry = {
+            "title":      doc.get("title", "")[:120],
+            "source":     doc.get("source", ""),
+            "similarity": round(score, 3),
+            "polarity":   art_polarity,
+            "is_admin":   is_admin,
+        }
+
+        # Admin article — strongest signal, set immediately
+        if is_admin and admin_verdict is None:
+            if art_polarity == "neutral" or art_polarity == user_polarity:
                 admin_verdict = ("REAL", entry)
             else:
                 admin_verdict = ("FAKE", entry)
             continue
 
-        if article_polarity == "neutral":
-            neutral_docs.append(entry)
-        elif article_polarity == user_polarity:
-            supporting.append(entry)
-        else:
-            contradicting.append(entry)
+        if art_polarity == user_polarity:
+            supporting.append({"weight": weight, **entry})
+        elif art_polarity != "neutral":
+            contradicting.append({"weight": weight, **entry})
 
-    # ── Admin verdict overrides everything ────────────────────────
+    # ── Step 2: Google Fact Check (ALL time, no date filter) ───────
+    fact_check = check_google_factcheck(headline)
+
+    # ── Step 3: Compute final verdict ─────────────────────────────
+    prediction = "UNCERTAIN"
+    confidence = 0.5
+    reason     = "No strong evidence found."
+
+    # Priority 1 — Admin record in your DB
     if admin_verdict:
-        verdict, admin_entry = admin_verdict
-        return {
-            "prediction":            verdict,
-            "confidence":            1.0,
-            "reason":                f"{'Confirmed' if verdict == 'REAL' else 'Contradicted'} by admin-verified record.",
-            "supporting_articles":   supporting,
-            "contradicting_articles":contradicting,
-            "admin_article":         admin_entry,
-            "total_checked":         len(matches),
-        }
+        prediction = admin_verdict[0]
+        confidence = 1.0
+        reason     = f"{'Confirmed' if prediction == 'REAL' else 'Contradicted'} by admin-verified record."
 
-    # ── Weighted vote ─────────────────────────────────────────────
-    support_weight = sum(e["weight"] for e in supporting)
-    contra_weight  = sum(e["weight"] for e in contradicting)
-    total_weight   = support_weight + contra_weight
-
-    if total_weight == 0:
-        return {
-            "prediction":            "UNCERTAIN",
-            "confidence":            0.0,
-            "reason":                "Related articles found but none have clear positive/negative polarity.",
-            "supporting_articles":   [],
-            "contradicting_articles":[],
-            "admin_article":         None,
-            "total_checked":         len(matches),
-        }
-
-    # Raw score = how much support outweighs contradiction
-    raw_confidence = (support_weight - contra_weight) / total_weight
-
-    # Normalize to [0, 1]
-    # +1.0 = fully supported, 0.0 = perfectly split, -1.0 = fully contradicted
-    normalized = (raw_confidence + 1.0) / 2.0
-
-    # Scale down if contradictions exist (penalty per contradicting article)
-    if contradicting:
-        penalty     = (contra_weight / total_weight) * 0.5
-        normalized  = max(0.0, normalized - penalty)
-
-    # Determine final verdict from normalized score
-    if normalized >= 0.65:
-        prediction = "REAL"
-        reason = (
-            f"{len(supporting)} article(s) support this claim, "
-            f"{len(contradicting)} oppose it. "
-            f"Confidence adjusted for contradictions."
+    # Priority 2 — Google Fact Check has a clear verdict
+    elif fact_check.get("found") and fact_check["verdict"] in ("REAL", "FAKE"):
+        prediction = fact_check["verdict"]
+        # Scale confidence based on how many fact checks agree
+        total   = fact_check["total_checked"]
+        agreeing = fact_check["fake_count"] if prediction == "FAKE" else fact_check["real_count"]
+        confidence = round(0.75 + (agreeing / total) * 0.20, 4)  # 0.75–0.95
+        reason  = (
+            f"{agreeing}/{total} fact-check source(s) rate this as "
+            f"'{fact_check['top_result']['raw_rating']}' "
+            f"— {fact_check['top_result']['publisher']}."
         )
-    elif normalized <= 0.35:
-        prediction = "FAKE"
-        reason = (
-            f"{len(contradicting)} article(s) contradict this claim, "
-            f"only {len(supporting)} support it."
-        )
+
+    # Priority 3 — Weighted DB voting
+    elif matches:
+        support_w = sum(e["weight"] for e in supporting)
+        contra_w  = sum(e["weight"] for e in contradicting)
+        total_w   = support_w + contra_w
+
+        if total_w > 0:
+            raw        = (support_w - contra_w) / total_w
+            normalized = (raw + 1.0) / 2.0
+
+            # Reduce confidence proportional to contradictions
+            if contradicting:
+                penalty    = (contra_w / total_w) * 0.4
+                normalized = max(0.0, normalized - penalty)
+
+            confidence = round(normalized, 4)
+
+            if confidence >= 0.65:
+                prediction = "REAL"
+                reason     = (
+                    f"{len(supporting)} article(s) support this claim, "
+                    f"{len(contradicting)} contradict it."
+                )
+            elif confidence <= 0.35:
+                prediction = "FAKE"
+                reason     = (
+                    f"{len(contradicting)} article(s) contradict this claim, "
+                    f"only {len(supporting)} support it."
+                )
+            else:
+                prediction = "UNCERTAIN"
+                reason     = (
+                    f"Mixed signals — {len(supporting)} supporting, "
+                    f"{len(contradicting)} contradicting."
+                )
+        else:
+            # Articles found but all neutral polarity
+            prediction = "UNCERTAIN"
+            confidence = 0.5
+            reason     = "Related articles found but no clear positive/negative signal."
+
+    # Priority 4 — Nothing found anywhere
     else:
         prediction = "UNCERTAIN"
-        reason = (
-            f"Mixed evidence — {len(supporting)} supporting, "
-            f"{len(contradicting)} contradicting articles found."
-        )
+        confidence = 0.0
+        reason     = "No related articles found in database or fact-check records."
+
+    response_time = (datetime.utcnow() - start_time).total_seconds()
 
     return {
-        "prediction":            prediction,
-        "confidence":            round(normalized, 4),
-        "reason":                reason,
-        "supporting_articles":   supporting,
-        "contradicting_articles":contradicting,
-        "admin_article":         None,
-        "total_checked":         len(matches),
+        "status":                  "success",
+        "headline":                headline,
+        "prediction":              prediction,
+        "confidence":              confidence,
+        "reason":                  reason,
+        "user_claim_polarity":     user_polarity,
+        "fact_check":              fact_check,
+        "supporting_articles":     supporting[:5],
+        "contradicting_articles":  contradicting[:5],
+        "total_db_matched":        len(matches),
+        "response_time_seconds":   round(response_time, 3),
     }
-
-
-@app.post("/verify")
-def verify_news(data: NewsRequest):
-    text = data.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Text cannot be empty.")
-
-    user_polarity = get_polarity(text)
-    matches       = find_all_similar_news(text, top_k=10, min_score=0.25)
-
-    if matches:
-        result = compute_final_confidence(user_polarity, matches)
-
-        best_doc, best_score = matches[0]
-        return {
-            **result,
-            "user_claim_polarity": user_polarity,
-            "best_match_title":    best_doc.get("title", ""),
-            "best_match_score":    round(best_score, 4),
-        }
-
-    # No DB matches at all → ML fallback
-    vec        = vectorizer.transform([text])
-    prediction = model.predict(vec)[0]
-    confidence = float(model.predict_proba(vec).max())
-
-    return {
-        "prediction":            "REAL" if prediction == 1 else "FAKE",
-        "confidence":            round(confidence, 4),
-        "reason":                "No DB match found — ML model used.",
-        "supporting_articles":   [],
-        "contradicting_articles":[],
-        "admin_article":         None,
-        "total_checked":         0,
-        "user_claim_polarity":   user_polarity,
-        "best_match_title":      None,
-        "best_match_score":      None,
-    }
-
 # if __name__ == "__main__":
 #     port = int(os.environ.get("PORT", 10000))
 #     uvicorn.run(app, host="0.0.0.0", port=port)
