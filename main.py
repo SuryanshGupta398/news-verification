@@ -56,6 +56,9 @@ def load_resources_background():
                  "verified_by_admin": 1, "createdAt": 1}
             )
         )
+        .sort("createdAt", -1)
+        .limit(5000)
+        
         print(f"✅ Loaded {len(news_docs)} news documents from MongoDB.")
 
         if news_docs:
