@@ -2,6 +2,8 @@ from fastapi import FastAPI, APIRouter, Form
 import joblib
 from pymongo import MongoClient
 import os
+import re
+import requests
 
 app = FastAPI()
 news_router = APIRouter(prefix="/news", tags=["News"])
@@ -25,10 +27,9 @@ from fastapi import HTTPException
 
 # import numpy as np
 
-# from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics.pairwise import cosine_similarity
 from pydantic import BaseModel
-# from fastapi.middleware.cors import CORSMiddleware
-# from datetime import datetime
+from datetime import datetime
 
 # def utc_now_iso():
 #     return datetime.utcnow().isoformat()
@@ -40,12 +41,13 @@ from pydantic import BaseModel
 import threading
 
 model = None
+collection=None
 vectorizer = None
 news_docs = []
 tfidf_db = None
 
 def load_resources_background():
-    global model, vectorizer, news_docs, tfidf_db
+    global model, vectorizer, news_docs, tfidf_db, collection
 
     try:
         print("🔹 Loading model...")
@@ -105,8 +107,6 @@ def find_similar_news(user_text):
 
     return news_docs[index], score
     
-import re
-from sklearn.metrics.pairwise import cosine_similarity
 
 # ── Extract named entities (people, orgs) from text ───────────────
 def extract_entities(text: str) -> set:
@@ -252,7 +252,7 @@ def search_mongodb(headline: str) -> list:
 
         while True:
             batch = list(
-                news_collection.find(
+                collection.find(
                     {},
                     {"title": 1, "description": 1, "source": 1, "verified_by_admin": 1, "createdAt": 1}
                 )
