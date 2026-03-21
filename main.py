@@ -298,10 +298,10 @@ async def verify_news(headline: str = Form(...)):
         raise HTTPException(status_code=400, detail="Headline is required.")
 
     if collection is None:
-    return {
-        "status": "loading",
-        "message": "Server is starting, try again in few seconds"
-    }
+        return {
+            "status": "loading",
+            "message": "Server is starting, try again in few seconds"
+        }
     start_time    = datetime.utcnow()
     user_polarity = get_polarity(headline)
 
